@@ -113,12 +113,13 @@ public class WakeOnLanPacketSender {
 
     private void sendMagicPacket(byte[] magicPacket) {
         try (DatagramSocket socket = new DatagramSocket()) {
-            if (StringUtils.isEmpty(hostname)) {
-                broadcastMagicPacket(magicPacket, socket);
-            } else {
+            if (StringUtils.isEmpty(macAddress)) {
                 SocketAddress socketAddress = new InetSocketAddress(this.hostname,
                         Objects.requireNonNullElse(this.port, WOL_UDP_PORT));
                 sendMagicPacketToIp(magicPacket, socket, socketAddress);
+                broadcastMagicPacket(magicPacket, socket);
+            } else {
+                broadcastMagicPacket(magicPacket, socket);
             }
         } catch (SocketException e) {
             logger.error("Failed to open Wake-on-LAN datagram socket", e);
