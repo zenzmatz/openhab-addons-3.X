@@ -591,7 +591,15 @@ public class MoonrakerHandler extends BaseThingHandler implements EventListener 
         }
 
         if (state_message == null || state_message.trim().length() == 0) {
-            state_message = state.substring(0, 1).toUpperCase() + state.substring(1).toLowerCase();
+            try {
+                state_message = state.substring(0, 1).toUpperCase() + state.substring(1).toLowerCase();
+            } catch (final Exception e) {
+                if (e instanceof Exception) {
+                    handleClientException(e);
+                } else {
+                    logger.warn("Unexpected throwable: {0}", e);
+                }
+            }
         }
 
         updateState("general#state", new StringType(state));
