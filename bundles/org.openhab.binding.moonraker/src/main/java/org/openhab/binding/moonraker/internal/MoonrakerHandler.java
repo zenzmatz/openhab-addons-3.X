@@ -14,7 +14,9 @@ package org.openhab.binding.moonraker.internal;
 
 import static org.openhab.binding.moonraker.internal.MoonrakerBindingConstants.*;
 
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
+import java.io.InputStream;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.net.SocketTimeoutException;
@@ -25,7 +27,6 @@ import java.text.MessageFormat;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.Base64;
 import java.util.List;
 import java.util.Map;
 import java.util.Scanner;
@@ -882,6 +883,26 @@ public class MoonrakerHandler extends BaseThingHandler implements EventListener 
         }
     }
 
+    private byte[] getByteArrayFromImageURL(String url) {
+        try {
+            logger.debug("Thumbnailurl: " + url);
+            URL imageUrl = new URL(url);
+            URLConnection ucon = imageUrl.openConnection();
+            InputStream is = ucon.getInputStream();
+            ByteArrayOutputStream baos = new ByteArrayOutputStream();
+            byte[] buffer = new byte[1024];
+            int read = 0;
+            while ((read = is.read(buffer, 0, buffer.length)) != -1) {
+                baos.write(buffer, 0, read);
+            }
+            baos.flush();
+            return baos.toByteArray();
+        } catch (Exception e) {
+            logger.debug("Error: " + e.toString());
+            return new byte[0];
+        }
+    }
+
     /**
      * Update channels for the file metadata
      * 
@@ -890,6 +911,21 @@ public class MoonrakerHandler extends BaseThingHandler implements EventListener 
     private void processFileMetaData(JsonObject object) {
         String groupID = "file_info";
 
+        // get filename before thumbnail:
+        String directory = "";
+        for (Map.Entry<String, JsonElement> entry : object.entrySet()) {
+            if (entry.getValue().isJsonPrimitive()) {
+                if (entry.getKey().equals("filename")) {
+                    try {
+                        String rawDirectory = entry.getValue().getAsJsonPrimitive().getAsString();
+                        directory = rawDirectory.substring(0, rawDirectory.lastIndexOf("/")) + "/";
+                    } catch (Exception ex) {
+                        logger.debug("Error: " + ex.toString());
+                        directory = "";
+                    }
+                }
+            }
+        }
         for (Map.Entry<String, JsonElement> entry : object.entrySet()) {
             if (entry.getValue().isJsonNull()) {
                 Channel channel = getChannel(groupID, entry.getKey());
@@ -948,8 +984,15 @@ public class MoonrakerHandler extends BaseThingHandler implements EventListener 
                         && thumbnails.get(thumbnails.size() - 1).isJsonObject()) {
                     JsonObject thumbnail = thumbnails.get(thumbnails.size() - 1).getAsJsonObject();
                     Channel channel = getChannel(groupID, "thumbnail");
-                    this.updateState(channel.getUID(),
-                            new RawType(Base64.getDecoder().decode(thumbnail.get("data").getAsString()), "image/png"));
+
+                    String thumbnailUrl = "http://" + config.host + "/server/files/gcodes/" + directory
+                            + thumbnail.get("relative_path").getAsString();
+                    byte[] thumbnailPath = getByteArrayFromImageURL(thumbnailUrl);
+                    if (thumbnailPath == new byte[0]) {
+                        logger.debug("No thumbnail exists");
+                    } else {
+                        this.updateState(channel.getUID(), new RawType(thumbnailPath, "image/png"));
+                    }
                 } else {
                     logger.debug("Unknown Json object {}#{}: {}", groupID, entry.getKey(), entry.getValue());
                 }
