@@ -78,6 +78,7 @@ public class MoonrakerWebSocket {
 
         if (session != null) {
             session.close();
+            session = null;
         }
 
         logger.debug("Connecting to Moonraker WebSocket...");

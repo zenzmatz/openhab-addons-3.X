@@ -214,7 +214,7 @@ public class MoonrakerHandler extends BaseThingHandler implements EventListener 
                 connection.connect();
 
                 try (Scanner scanner = new Scanner(connection.getInputStream(), "UTF-8").useDelimiter("\\A")) {
-                    token = new JsonParser().parse(scanner.next()).getAsJsonObject().getAsJsonPrimitive("result")
+                    token = JsonParser.parseString(scanner.next()).getAsJsonObject().getAsJsonPrimitive("result")
                             .getAsString();
                 }
             }
@@ -803,7 +803,7 @@ public class MoonrakerHandler extends BaseThingHandler implements EventListener 
                             }
                         } else if (value.isString()) {
                             if (entry2.getKey().equals("filename")) {
-                                if (value.getAsString() != null && value.getAsString().trim().length() > 0) {
+                                if (value.getAsString().trim().length() > 0) {
                                     JsonObject object2 = new JsonObject();
                                     object2.addProperty("filename", value.getAsString());
                                     webSocket.sendRequest("server.files.metadata", object2);
@@ -888,15 +888,16 @@ public class MoonrakerHandler extends BaseThingHandler implements EventListener 
             logger.debug("Thumbnailurl: " + url);
             URL imageUrl = new URL(url);
             URLConnection ucon = imageUrl.openConnection();
-            InputStream is = ucon.getInputStream();
-            ByteArrayOutputStream baos = new ByteArrayOutputStream();
-            byte[] buffer = new byte[1024];
-            int read = 0;
-            while ((read = is.read(buffer, 0, buffer.length)) != -1) {
-                baos.write(buffer, 0, read);
+            try (InputStream is = ucon.getInputStream()) {
+                ByteArrayOutputStream baos = new ByteArrayOutputStream();
+                byte[] buffer = new byte[1024];
+                int read = 0;
+                while ((read = is.read(buffer, 0, buffer.length)) != -1) {
+                    baos.write(buffer, 0, read);
+                }
+                baos.flush();
+                return baos.toByteArray();
             }
-            baos.flush();
-            return baos.toByteArray();
         } catch (Exception e) {
             logger.debug("Error: " + e.toString());
             return new byte[0];
