@@ -360,9 +360,7 @@ public class MoonrakerHandler extends BaseThingHandler implements EventListener 
      */
     private void getStartupInfo() {
         webSocket.sendRequest("printer.info");
-        webSocket.sendRequest("server.info");
         webSocket.sendRequest("machine.update.status");
-        // webSocket.sendRequest("machine.device_power.devices");
     }
 
     @Override
@@ -386,14 +384,17 @@ public class MoonrakerHandler extends BaseThingHandler implements EventListener 
         switch (method) {
             case "notify_klippy_ready":
                 updateStatus(ThingStatus.ONLINE);
+                webSocket.sendRequest("server.info");
                 webSocket.sendRequest("printer.objects.list");
                 return;
             case "notify_klippy_disconnected":
                 updateStatus(ThingStatus.OFFLINE, ThingStatusDetail.GONE, "Klippy disconnected");
+                webSocket.sendRequest("server.info");
                 requestStateDelayed();
                 return;
             case "notify_klippy_shutdown":
                 updateStatus(ThingStatus.OFFLINE, ThingStatusDetail.DISABLED, "Klippy shutdown");
+                webSocket.sendRequest("server.info");
                 requestStateDelayed();
                 return;
             case "machine.device_power.on":
