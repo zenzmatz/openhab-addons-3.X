@@ -19,6 +19,7 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
+import java.net.InetAddress;
 import java.net.SocketTimeoutException;
 import java.net.URI;
 import java.net.URL;
@@ -132,6 +133,24 @@ public class MoonrakerHandler extends BaseThingHandler implements EventListener 
         logger.debug("Moonraker handler shut down.");
     }
 
+    /**
+     * Check if webSocket is not Null
+     */
+    private void sendWebSocketRequest(String requestString) {
+        if (webSocket != null) {
+            webSocket.sendRequest(requestString);
+        }
+    }
+
+    /**
+     * Check if webSocket is not Null
+     */
+    private void sendWebSocketRequest(String requestString, JsonObject object) {
+        if (webSocket != null) {
+            webSocket.sendRequest(requestString, object);
+        }
+    }
+
     @Override
     public void handleCommand(ChannelUID channelUID, Command command) {
         logger.debug("handleCommand {}, {}", channelUID, command);
@@ -144,7 +163,7 @@ public class MoonrakerHandler extends BaseThingHandler implements EventListener 
                 || channelUID.getIdWithoutGroup().equals("firmware_restart")
                 || channelUID.getIdWithoutGroup().equals("restart")) {
             if (command.equals(OnOffType.ON)) {
-                webSocket.sendRequest("printer." + channelUID.getIdWithoutGroup());
+                sendWebSocketRequest("printer." + channelUID.getIdWithoutGroup());
                 new java.util.Timer().schedule(new TimerTask() {
                     @Override
                     public void run() {
@@ -154,7 +173,7 @@ public class MoonrakerHandler extends BaseThingHandler implements EventListener 
             }
         } else if (channelUID.getIdWithoutGroup().equals("server_restart")) {
             if (command.equals(OnOffType.ON)) {
-                webSocket.sendRequest("server." + channelUID.getIdWithoutGroup());
+                sendWebSocketRequest("server." + channelUID.getIdWithoutGroup());
                 new java.util.Timer().schedule(new TimerTask() {
 
                     @Override
@@ -166,7 +185,7 @@ public class MoonrakerHandler extends BaseThingHandler implements EventListener 
         } else if (channelUID.getIdWithoutGroup().equals("pause") || channelUID.getIdWithoutGroup().equals("resume")
                 || channelUID.getIdWithoutGroup().equals("cancel")) {
             if (command.equals(OnOffType.ON)) {
-                webSocket.sendRequest("printer.print." + channelUID.getIdWithoutGroup());
+                sendWebSocketRequest("printer.print." + channelUID.getIdWithoutGroup());
                 new java.util.Timer().schedule(new TimerTask() {
                     @Override
                     public void run() {
@@ -178,11 +197,11 @@ public class MoonrakerHandler extends BaseThingHandler implements EventListener 
 
             JsonObject object = new JsonObject();
             object.addProperty("script", command.toString());
-            webSocket.sendRequest("printer.gcode.script", object);
+            sendWebSocketRequest("printer.gcode.script", object);
         } else if (channelUID.getIdWithoutGroup().equals("gcodeprint_file_command") && command instanceof StringType) {
             JsonObject object = new JsonObject();
             object.addProperty("filename", command.toString());
-            webSocket.sendRequest("printer.print.start", object);
+            sendWebSocketRequest("printer.print.start", object);
         } else if (channelUID.getGroupId().startsWith("power_device")
                 && channelUID.getIdWithoutGroup().equals("switch")) {
             String device = channelUID.getGroupId().substring("power_device__".length());
@@ -190,10 +209,27 @@ public class MoonrakerHandler extends BaseThingHandler implements EventListener 
             JsonObject object = new JsonObject();
             object.add(device, JsonNull.INSTANCE);
             if (command.equals(OnOffType.ON)) {
-                webSocket.sendRequest("machine.device_power.on", object);
+                sendWebSocketRequest("machine.device_power.on", object);
             } else if (command.equals(OnOffType.OFF)) {
-                webSocket.sendRequest("machine.device_power.off", object);
+                sendWebSocketRequest("machine.device_power.off", object);
             }
+        }
+    }
+
+    private boolean cleanUpandPing() {
+        try {
+            if (this.webSocket != null) {
+                this.webSocket.stop();
+                this.webSocket = null;
+            }
+        } catch (final Exception e) {
+            logger.debug("Cannot stop webSocket");
+        }
+        try {
+            return InetAddress.getByName(config.host).isReachable(WEBSOCKET_TIMEOUT_SECONDS);
+        } catch (final Exception e) {
+            logger.debug("Cannot check if host is reachable");
+            return false;
         }
     }
 
@@ -202,38 +238,46 @@ public class MoonrakerHandler extends BaseThingHandler implements EventListener 
      * {@link RPCResponse}s from the Moonraker API.
      */
     private void startWebSocket() {
-        try {
-            String token = null;
-            if (config.apikey != null && config.apikey.trim().length() > 0) {
-                logger.debug("Obtaining oneshot token.");
+        if (cleanUpandPing()) {
+            try {
+                String token = null;
+                if (config.apikey != null && config.apikey.trim().length() > 0) {
+                    logger.debug("Obtaining oneshot token.");
 
-                URL url = new URI("http", null, config.host, config.port, "/access/oneshot_token", null, null).toURL();
-                URLConnection connection = url.openConnection();
-                connection.setRequestProperty("X-Api-Key", config.apikey);
-                connection.setConnectTimeout(WEBSOCKET_TIMEOUT_SECONDS * 1000);
-                connection.connect();
+                    URL url = new URI("http", null, config.host, config.port, "/access/oneshot_token", null, null)
+                            .toURL();
+                    URLConnection connection = url.openConnection();
+                    connection.setRequestProperty("X-Api-Key", config.apikey);
+                    connection.setConnectTimeout(WEBSOCKET_TIMEOUT_SECONDS * 1000);
+                    connection.connect();
 
-                try (Scanner scanner = new Scanner(connection.getInputStream(), "UTF-8").useDelimiter("\\A")) {
-                    token = JsonParser.parseString(scanner.next()).getAsJsonObject().getAsJsonPrimitive("result")
-                            .getAsString();
+                    try (Scanner scanner = new Scanner(connection.getInputStream(), "UTF-8").useDelimiter("\\A")) {
+                        token = JsonParser.parseString(scanner.next()).getAsJsonObject().getAsJsonPrimitive("result")
+                                .getAsString();
+                    }
                 }
+
+                logger.debug("Starting Moonraker websocket.");
+                MoonrakerWebSocket localWebSocket = new MoonrakerWebSocket(this, new URI("ws", null, config.host,
+                        config.port, "/websocket", token == null ? null : "token=" + token, null),
+                        WEBSOCKET_TIMEOUT_SECONDS * 1000);
+
+                if (this.webSocket != null && this.webSocket.isRunning()) {
+                    this.webSocket.stop();
+                    this.webSocket = null;
+                }
+
+                this.webSocket = localWebSocket;
+                // localWebSocket.start();
+                this.webSocket.start();
+                updateStatus(ThingStatus.ONLINE);
+            } catch (final Exception e) { // Catch Exception because websocket start throws Exception
+                handleClientException(e);
             }
-
-            logger.debug("Starting Moonraker websocket.");
-            MoonrakerWebSocket localWebSocket = new MoonrakerWebSocket(this, new URI("ws", null, config.host,
-                    config.port, "/websocket", token == null ? null : "token=" + token, null),
-                    WEBSOCKET_TIMEOUT_SECONDS * 1000);
-
-            if (this.webSocket != null && this.webSocket.isRunning()) {
-                this.webSocket.stop();
-                this.webSocket = null;
-            }
-
-            this.webSocket = localWebSocket;
-            localWebSocket.start();
-            updateStatus(ThingStatus.ONLINE);
-        } catch (final Exception e) { // Catch Exception because websocket start throws Exception
-            handleClientException(e);
+        } else {
+            logger.debug("Configured host is not reachable");
+            updateStatus(ThingStatus.OFFLINE, ThingStatusDetail.GONE, "Configured host not reachable");
+            scheduleRestartClient(true, true);
         }
     }
 
@@ -263,10 +307,10 @@ public class MoonrakerHandler extends BaseThingHandler implements EventListener 
      * Schedules a re-initialization in the given future.
      *
      * @param delayed when it is scheduled delayed, it starts with a delay of
-     *            {@link org.openhab.binding.moonraker.internal.MoonRakerConstants#REINITIALIZE_DELAY_SECONDS}
+     *            {@link org.openhab.binding.moonraker.internal.MoonrakerConfiguration#reinitializeDelay}
      *            seconds, otherwise it starts directly
      */
-    private synchronized void scheduleRestartClient(final boolean delayed) {
+    private synchronized void scheduleRestartClient(final boolean delayed, final boolean notReachable) {
         if (!this.isInitialized() || this.getCallback() == null)
             return;
 
@@ -279,7 +323,13 @@ public class MoonrakerHandler extends BaseThingHandler implements EventListener 
             return;
         }
 
-        final long seconds = delayed ? REINITIALIZE_DELAY_SECONDS : 0;
+        long seconds = 0;
+        if (notReachable) {
+            // Host is not reachable, so we are waiting configured time
+            seconds = config.waitingTimeNotReachable;
+        } else if (delayed) {
+            seconds = config.reinitializeDelay;
+        }
         logger.debug("Scheduling reinitialize in {} seconds.", seconds);
         reinitJob = scheduler.schedule(this::startWebSocket, seconds, TimeUnit.SECONDS);
     }
@@ -316,7 +366,7 @@ public class MoonrakerHandler extends BaseThingHandler implements EventListener 
             updateStatus(ThingStatus.OFFLINE, ThingStatusDetail.NONE, e.getMessage());
         }
         if (isReinitialize) {
-            scheduleRestartClient(true);
+            scheduleRestartClient(true, false);
             return true;
         }
         return false;
@@ -324,14 +374,14 @@ public class MoonrakerHandler extends BaseThingHandler implements EventListener 
 
     /**
      * Try to get startup info after
-     * {@link org.openhab.binding.moonraker.internal.MoonRakerConstants#REINITIALIZE_DELAY_SECONDS}
+     * {@link org.openhab.binding.moonraker.internal.MoonrakerConfiguration#reinitializeDelay}
      */
     private void requestStateDelayed() {
         scheduler.schedule(() -> {
             if (webSocket.isRunning()) {
                 getStartupInfo();
             }
-        }, REINITIALIZE_DELAY_SECONDS, TimeUnit.SECONDS);
+        }, config.reinitializeDelay, TimeUnit.SECONDS);
     }
 
     @Override
@@ -352,15 +402,15 @@ public class MoonrakerHandler extends BaseThingHandler implements EventListener 
     @Override
     public void connectionClosed() {
         logger.debug("connectiomClosed");
-        scheduleRestartClient(true);
+        scheduleRestartClient(true, false);
     }
 
     /**
      * Get all info at initial connection
      */
     private void getStartupInfo() {
-        webSocket.sendRequest("printer.info");
-        webSocket.sendRequest("machine.update.status");
+        sendWebSocketRequest("printer.info");
+        sendWebSocketRequest("machine.update.status");
     }
 
     @Override
@@ -384,17 +434,14 @@ public class MoonrakerHandler extends BaseThingHandler implements EventListener 
         switch (method) {
             case "notify_klippy_ready":
                 updateStatus(ThingStatus.ONLINE);
-                webSocket.sendRequest("server.info");
-                webSocket.sendRequest("printer.objects.list");
+                sendWebSocketRequest("printer.objects.list");
                 return;
             case "notify_klippy_disconnected":
                 updateStatus(ThingStatus.OFFLINE, ThingStatusDetail.GONE, "Klippy disconnected");
-                webSocket.sendRequest("server.info");
                 requestStateDelayed();
                 return;
             case "notify_klippy_shutdown":
                 updateStatus(ThingStatus.OFFLINE, ThingStatusDetail.DISABLED, "Klippy shutdown");
-                webSocket.sendRequest("server.info");
                 requestStateDelayed();
                 return;
             case "machine.device_power.on":
@@ -455,6 +502,8 @@ public class MoonrakerHandler extends BaseThingHandler implements EventListener 
                 return;
             case "notify_proc_stat_update":
                 return;
+            case "notify_service_state_changed":
+                return;
             default:
                 logger.info("Unknown method in response: {}", response);
                 return;
@@ -479,7 +528,7 @@ public class MoonrakerHandler extends BaseThingHandler implements EventListener 
         JsonObject jsonRootObject = new JsonObject();
         jsonRootObject.add("objects", jsonObject);
 
-        webSocket.sendRequest("printer.objects.subscribe", jsonRootObject);
+        sendWebSocketRequest("printer.objects.subscribe", jsonRootObject);
     }
 
     /**
@@ -807,7 +856,7 @@ public class MoonrakerHandler extends BaseThingHandler implements EventListener 
                                 if (value.getAsString().trim().length() > 0) {
                                     JsonObject object2 = new JsonObject();
                                     object2.addProperty("filename", value.getAsString());
-                                    webSocket.sendRequest("server.files.metadata", object2);
+                                    sendWebSocketRequest("server.files.metadata", object2);
                                 } else {
                                     for (Channel fileInfoChannel : this.getThing().getChannelsOfGroup("file_info")) {
                                         this.updateState(fileInfoChannel.getUID(), UnDefType.UNDEF);
@@ -1037,7 +1086,7 @@ public class MoonrakerHandler extends BaseThingHandler implements EventListener 
         switch (klippy_state) {
             case "ready":
                 updateStatus(ThingStatus.ONLINE);
-                webSocket.sendRequest("printer.objects.list");
+                sendWebSocketRequest("printer.objects.list");
                 break;
             case "error":
                 updateStatus(ThingStatus.OFFLINE, ThingStatusDetail.GONE,

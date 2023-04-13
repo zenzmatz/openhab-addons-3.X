@@ -25,4 +25,8 @@ public class MoonrakerConfiguration {
     public int port;
     /** Optional API key */
     public String apikey;
+    /** Optional host not reachable waiting time */
+    public int waitingTimeNotReachable;
+    /** Delay of reinitialize of websocket */
+    public int reinitializeDelay;
 }

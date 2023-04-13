@@ -26,8 +26,6 @@ import org.openhab.core.thing.type.ChannelGroupTypeUID;
 public class MoonrakerBindingConstants {
     private static final String BINDING_ID = "moonraker";
 
-    /** Delay between connection attempts */
-    public static final int REINITIALIZE_DELAY_SECONDS = 2;
     /** Timeout for connection attempts */
     public static final int WEBSOCKET_TIMEOUT_SECONDS = 2;
     /** Delay between channel refresh */

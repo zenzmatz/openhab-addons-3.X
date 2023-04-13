@@ -66,6 +66,18 @@
 				<description>Moonraker API key</description>
 				<advanced>true</advanced>
 			</parameter>
+			<parameter name="waitingTimeNotReachable" type="integer" min="0" max="65535" required="false">
+				<label>Waiting time not reachable</label>
+				<description>Time which Binding is waiting for reconnect when host is not reachable (default: 60 seconds)</description>
+				<default>60</default>
+				<advanced>true</advanced>
+			</parameter>
+			<parameter name="reinitializeDelay" type="integer" min="0" max="65535" required="false">
+				<label>Delay of websocket reinitialization</label>
+				<description>Time for delay of websocket reinitialization (default: 5 seconds)</description>
+				<default>5</default>
+				<advanced>true</advanced>
+			</parameter>
 		</config-description>
 
 	</thing-type>
